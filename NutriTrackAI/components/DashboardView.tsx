@@ -12,16 +12,23 @@ import Animated, {
   SlideInDown,
   SlideOutDown,
 } from "react-native-reanimated";
+import { useQuery } from "@tanstack/react-query";
+import { supabase, useSession } from "../lib/supabase";
 import { CircularProgress } from "./CircularProgress";
 import { MealItem } from "./MealItem";
 import { StreakScreen } from "./StreakScreen";
+import { DashboardStatSkeleton, MealCardSkeleton } from "./SkeletonLoaders";
+import { useNetInfo } from "../lib/useNetInfo";
 
 interface DashboardViewProps {
   onOpenCam?: () => void;
   onOpenSearch?: () => void;
   onOpenScanLabel?: () => void;
-  onOpenDayDetail?: () => void;
+  onOpenDayDetail?: (date: string) => void;
+  onOpenMealDetail?: (id: string) => void;
+  onOpenHistory?: () => void;
   onOpenVoice?: () => void;
+  onOpenProfile?: () => void;
 }
 
 const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
@@ -31,10 +38,90 @@ export function DashboardView({
   onOpenSearch,
   onOpenScanLabel,
   onOpenDayDetail,
+  onOpenMealDetail,
+  onOpenHistory,
   onOpenVoice,
+  onOpenProfile,
 }: DashboardViewProps) {
+  const { user } = useSession();
   const [isFabOpen, setIsFabOpen] = useState(false);
   const [showStreakScreen, setShowStreakScreen] = useState(false);
+  const { isConnected } = useNetInfo();
+
+  // ─── Data Fetching with React Query ──────────────────────────────────────────
+  const { data, isLoading } = useQuery({
+    queryKey: ['dashboard', user?.id],
+    enabled: !!user?.id,
+    queryFn: async () => {
+      // 1. Get profile goals
+      const { data: profile } = await supabase
+        .from("profiles")
+        .select("calorie_goal, protein_goal_g, carbs_goal_g, fat_goal_g")
+        .eq("id", user!.id)
+        .single();
+
+      const goals = {
+        cal: profile?.calorie_goal || 2000,
+        p: profile?.protein_goal_g || 150,
+        c: profile?.carbs_goal_g || 200,
+        f: profile?.fat_goal_g || 65,
+      };
+
+      // 2. Get today's consumed items
+      const today = new Date().toISOString().split("T")[0];
+      const { data: meals } = await supabase
+        .from("meals")
+        .select("id, meal_type, logged_at")
+        .eq("user_id", user!.id)
+        .gte("logged_at", `${today}T00:00:00.000Z`)
+        .lte("logged_at", `${today}T23:59:59.999Z`);
+
+      let consumed = { cal: 0, p: 0, c: 0, f: 0 };
+      let recentMeals: any[] = [];
+
+      if (meals && meals.length > 0) {
+        const mealIds = meals.map((m) => m.id);
+        const { data: items } = await supabase
+          .from("meal_items")
+          .select("*")
+          .in("meal_id", mealIds);
+
+        if (items) {
+          consumed = items.reduce(
+            (acc, curr) => {
+              acc.cal += Math.round(curr.calories || 0);
+              acc.p += Math.round(curr.protein_g || 0);
+              acc.c += Math.round(curr.carbs_g || 0);
+              acc.f += Math.round(curr.fat_g || 0);
+              return acc;
+            },
+            { cal: 0, p: 0, c: 0, f: 0 }
+          );
+
+          recentMeals = items.map((item) => {
+            const parentMeal = meals.find((m) => m.id === item.meal_id);
+            const dateObj = new Date(parentMeal?.logged_at || Date.now());
+            const timeStr = dateObj.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+            
+            return {
+              id: item.id,
+              mealId: parentMeal?.id,
+              title: item.food_name,
+              sub: parentMeal?.meal_type || "Snack",
+              time: timeStr,
+              cal: item.calories,
+              img: "https://images.unsplash.com/photo-1546069901-ba9599a7e63c?w=400&q=80",
+            };
+          }).reverse();
+        }
+      }
+      return { goals, consumed, recentMeals };
+    }
+  });
+
+  const goals = data?.goals || { cal: 2000, p: 150, c: 200, f: 65 };
+  const consumed = data?.consumed || { cal: 0, p: 0, c: 0, f: 0 };
+  const recentMeals = data?.recentMeals || [];
 
   // FAB Animation state
   const fabRotation = useSharedValue(0);
@@ -64,19 +151,38 @@ export function DashboardView({
           <Text className="text-2xl font-bold text-white tracking-wide">
             NutriTrack
           </Text>
-          <Pressable
-            onPress={() => setShowStreakScreen(true)}
-            style={({ pressed }) => [
-              { transform: [{ scale: pressed ? 0.95 : 1 }] },
-            ]}
-            className="flex-row items-center gap-1.5 bg-[#2a1705] border border-orange-900/30 px-3 py-1.5 rounded-full"
-          >
-            <Feather name="activity" size={16} color="#f97316" />
-            <Text className="text-orange-400 text-sm font-bold">3d</Text>
-          </Pressable>
+          <View className="flex-row items-center gap-3">
+            <Pressable
+              onPress={() => setShowStreakScreen(true)}
+              style={({ pressed }) => [
+                { transform: [{ scale: pressed ? 0.95 : 1 }] },
+              ]}
+              className="flex-row items-center gap-1.5 bg-[#2a1705] border border-orange-900/30 px-3 py-1.5 rounded-full"
+            >
+              <Feather name="activity" size={16} color="#f97316" />
+              <Text className="text-orange-400 text-sm font-bold">3d</Text>
+            </Pressable>
+            <Pressable 
+              onPress={onOpenProfile}
+              style={({ pressed }) => [
+                { transform: [{ scale: pressed ? 0.95 : 1 }] },
+              ]}
+              className="w-9 h-9 items-center justify-center bg-zinc-900 border border-zinc-800 rounded-full"
+            >
+               <Feather name="user" size={18} color="#a1a1aa" />
+            </Pressable>
+          </View>
         </View>
 
         <View className="px-6 flex-1">
+          {isLoading ? (
+            <>
+              <DashboardStatSkeleton />
+              <MealCardSkeleton />
+              <MealCardSkeleton />
+              <MealCardSkeleton />
+            </>
+          ) : (
           {/* Calorie Card */}
           <View className="bg-zinc-900 rounded-[32px] p-8 items-center justify-center relative border border-zinc-800/50 overflow-hidden mb-6">
             {/* Custom Gradient Glow - Approximated with View since blur is hard in RN */}
@@ -87,9 +193,9 @@ export function DashboardView({
               ]}
             />
 
-            <CircularProgress value={1250} max={2500} />
+            <CircularProgress value={consumed.cal} max={goals.cal} />
             <Text className="mt-4 text-zinc-500 font-medium text-sm">
-              of 2,500 kcal goal
+              of {goals.cal.toLocaleString()} kcal goal
             </Text>
           </View>
 
@@ -97,7 +203,7 @@ export function DashboardView({
           <View className="bg-zinc-900 rounded-[32px] p-6 border border-zinc-800/50 mb-6">
             <View className="flex-row justify-between items-center mb-6">
               <Text className="text-lg font-bold text-white">Macros</Text>
-              <Pressable onPress={onOpenDayDetail}>
+              <Pressable onPress={() => onOpenDayDetail?.(new Date().toISOString().split("T")[0])}>
                 <Text className="text-green-500 text-xs font-bold">
                   View Details
                 </Text>
@@ -110,12 +216,15 @@ export function DashboardView({
                 <View className="flex-row justify-between mb-2">
                   <Text className="text-sm text-zinc-300 font-medium">Protein</Text>
                   <View className="flex-row">
-                    <Text className="text-sm text-white font-bold">80g</Text>
-                    <Text className="text-sm text-zinc-600"> / 140g</Text>
+                    <Text className="text-sm text-white font-bold">{Math.round(consumed.p)}g</Text>
+                    <Text className="text-sm text-zinc-600"> / {Math.round(goals.p)}g</Text>
                   </View>
                 </View>
                 <View className="h-2 w-full bg-zinc-800 rounded-full overflow-hidden">
-                  <View className="h-full bg-cyan-400 w-[57%] rounded-full" />
+                  <View 
+                    style={{ width: `${Math.min(100, (consumed.p / Math.max(1, goals.p)) * 100)}%` }} 
+                    className="h-full bg-cyan-400 rounded-full" 
+                  />
                 </View>
               </View>
 
@@ -124,12 +233,15 @@ export function DashboardView({
                 <View className="flex-row justify-between mb-2">
                   <Text className="text-sm text-zinc-300 font-medium">Carbs</Text>
                   <View className="flex-row">
-                    <Text className="text-sm text-white font-bold">240g</Text>
-                    <Text className="text-sm text-zinc-600"> / 320g</Text>
+                    <Text className="text-sm text-white font-bold">{Math.round(consumed.c)}g</Text>
+                    <Text className="text-sm text-zinc-600"> / {Math.round(goals.c)}g</Text>
                   </View>
                 </View>
                 <View className="h-2 w-full bg-zinc-800 rounded-full overflow-hidden">
-                  <View className="h-full bg-yellow-400 w-[75%] rounded-full" />
+                  <View 
+                    style={{ width: `${Math.min(100, (consumed.c / Math.max(1, goals.c)) * 100)}%` }} 
+                    className="h-full bg-yellow-400 rounded-full" 
+                  />
                 </View>
               </View>
 
@@ -138,12 +250,15 @@ export function DashboardView({
                 <View className="flex-row justify-between mb-2">
                   <Text className="text-sm text-zinc-300 font-medium">Fat</Text>
                   <View className="flex-row">
-                    <Text className="text-sm text-white font-bold">45g</Text>
-                    <Text className="text-sm text-zinc-600"> / 75g</Text>
+                    <Text className="text-sm text-white font-bold">{Math.round(consumed.f)}g</Text>
+                    <Text className="text-sm text-zinc-600"> / {Math.round(goals.f)}g</Text>
                   </View>
                 </View>
                 <View className="h-2 w-full bg-zinc-800 rounded-full overflow-hidden">
-                  <View className="h-full bg-blue-500 w-[60%] rounded-full" />
+                  <View 
+                    style={{ width: `${Math.min(100, (consumed.f / Math.max(1, goals.f)) * 100)}%` }} 
+                    className="h-full bg-blue-500 rounded-full" 
+                  />
                 </View>
               </View>
             </View>
@@ -153,26 +268,31 @@ export function DashboardView({
           <View>
             <View className="flex-row justify-between items-center mb-4">
               <Text className="text-lg font-bold text-white">Today's Meals</Text>
-              <Pressable className="w-8 h-8 rounded-full bg-zinc-900 items-center justify-center">
+              <Pressable onPress={onOpenHistory} className="w-8 h-8 rounded-full bg-zinc-900 items-center justify-center">
                 <Feather name="more-horizontal" size={18} color="#a1a1aa" />
               </Pressable>
             </View>
 
-            <MealItem
-              title="Oatmeal & Berries"
-              sub="Breakfast"
-              time="8:00 AM"
-              cal={350}
-              img="https://images.unsplash.com/photo-1605782495071-f81088a16be8?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxvYXRtZWFsJTIwd2l0aCUyMGJlcnJpZXMlMjBib3dsJTIwZGFyayUyMG1vb2R5fGVufDF8fHx8MTc3MDE0NjYyOXww&ixlib=rb-4.1.0&q=80&w=1080"
-            />
-            <MealItem
-              title="Grilled Chicken Salad"
-              sub="Lunch"
-              time="12:30 PM"
-              cal={550}
-              img="https://images.unsplash.com/photo-1761315600943-d8a5bb0c499f?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxncmlsbGVkJTIwY2hpY2tlbiUyMHNhbGFkJTIwYm93bCUyMGRhcmslMjBiYWNrZ3JvdW5kfGVufDF8fHx8MTc3MDE0NjYzMHww&ixlib=rb-4.1.0&q=80&w=1080"
-            />
+            {recentMeals.length === 0 ? (
+              <View className="py-6 items-center">
+                <Text className="text-zinc-500">No meals logged today yet.</Text>
+                <Text className="text-zinc-600 text-sm mt-1">Tap + to add your first meal</Text>
+              </View>
+            ) : (
+              recentMeals.map((meal, index) => (
+                <Pressable key={`${meal.id}-${index}`} onPress={() => onOpenMealDetail?.(meal.mealId || meal.id)}>
+                  <MealItem
+                    title={meal.title}
+                    sub={meal.sub}
+                    time={meal.time}
+                    cal={meal.cal}
+                    img={meal.img}
+                  />
+                </Pressable>
+              ))
+            )}
           </View>
+          )}
         </View>
       </ScrollView>
 
@@ -212,6 +332,8 @@ export function DashboardView({
               label="Mic"
               icon="mic"
               delay={150}
+              disabled={!isConnected}
+              tooltip="Needs internet"
               onPress={() => {
                 onOpenVoice?.();
                 setIsFabOpen(false);
@@ -221,6 +343,8 @@ export function DashboardView({
               label="Camera"
               icon="camera"
               delay={200}
+              disabled={!isConnected}
+              tooltip="Needs internet"
               onPress={() => {
                 onOpenCam?.();
                 setIsFabOpen(false);
@@ -268,11 +392,15 @@ function FabAction({
   icon,
   delay,
   onPress,
+  disabled = false,
+  tooltip,
 }: {
   label: string;
   icon: keyof typeof Feather.glyphMap;
   delay: number;
   onPress: () => void;
+  disabled?: boolean;
+  tooltip?: string;
 }) {
   return (
     <Animated.View
@@ -280,17 +408,25 @@ function FabAction({
       exiting={SlideOutDown.duration(200)}
       className="flex-row items-center gap-4 mb-5"
     >
-      <Text className="text-white font-bold text-base tracking-wide shadow-black shadow-sm">
-        {label}
-      </Text>
+      <View style={{ alignItems: "flex-end" }}>
+        <Text className="text-white font-bold text-base tracking-wide shadow-black shadow-sm">
+          {label}
+        </Text>
+        {disabled && tooltip && (
+          <Text style={{ color: "#f97316", fontSize: 10, marginTop: 2 }}>{tooltip}</Text>
+        )}
+      </View>
       <Pressable
-        onPress={onPress}
+        onPress={disabled ? undefined : onPress}
         style={({ pressed }) => [
-          { transform: [{ scale: pressed ? 0.9 : 1 }] },
+          {
+            transform: [{ scale: pressed && !disabled ? 0.9 : 1 }],
+            opacity: disabled ? 0.4 : 1,
+          },
         ]}
         className="w-14 h-14 rounded-full bg-zinc-800 items-center justify-center border border-zinc-700"
       >
-        <Feather name={icon} size={24} color="white" />
+        <Feather name={icon} size={24} color={disabled ? "#52525b" : "white"} />
       </Pressable>
     </Animated.View>
   );

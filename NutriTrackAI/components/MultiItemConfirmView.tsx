@@ -5,23 +5,18 @@ import Animated, { FadeIn, FadeOut, Layout } from "react-native-reanimated";
 import Slider from "@react-native-community/slider";
 import { ImageWithFallback } from "./ImageWithFallback";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import type { FoodItem } from "../lib/nutritionLookup";
+import type { CachedMealPattern } from "../lib/mealCache";
 
-export interface FoodItem {
-  id: string;
-  name: string;
-  image: string;
-  quantity: number;
-  calories: number;
-  caloriesPerUnit: number;
-  unit: string;
-}
+export type { FoodItem };
 
 interface MultiItemConfirmViewProps {
   onBack: () => void;
-  onConfirm: (items: FoodItem[]) => void;
+  onConfirm: (items: FoodItem[]) => void | Promise<void>;
   initialItems: FoodItem[];
   capturedImage?: string;
   onAddItem?: () => void;
+  cacheMatch?: CachedMealPattern | null;
 }
 
 export function MultiItemConfirmView({
@@ -30,8 +25,10 @@ export function MultiItemConfirmView({
   initialItems,
   capturedImage,
   onAddItem,
+  cacheMatch,
 }: MultiItemConfirmViewProps) {
   const [items, setItems] = useState<FoodItem[]>(initialItems);
+  const [showCache, setShowCache] = useState<boolean>(!!cacheMatch);
   const insets = useSafeAreaInsets();
 
   const handleQuantityChange = (id: string, newQuantity: number) => {
@@ -54,6 +51,54 @@ export function MultiItemConfirmView({
   };
 
   const totalCalories = items.reduce((sum, item) => sum + item.calories, 0);
+
+  if (showCache && cacheMatch) {
+    const cachedCalories = cacheMatch.items.reduce((sum, item) => sum + item.calories, 0);
+    return (
+      <View className="flex-1 bg-black w-full justify-center items-center px-6">
+        <Animated.View 
+          entering={FadeIn.duration(300)}
+          className="bg-zinc-900 border border-zinc-800 rounded-3xl p-6 w-full items-center"
+        >
+          <View className="w-16 h-16 rounded-full bg-green-500/20 items-center justify-center mb-4">
+            <Feather name="clock" size={32} color="#22c55e" />
+          </View>
+          
+          <Text className="text-xl font-bold text-white mb-2 text-center">
+            Looks like your usual {cacheMatch.mealType || 'meal'}!
+          </Text>
+          
+          <View className="bg-zinc-950 w-full rounded-2xl p-4 my-4">
+            {cacheMatch.items.map((item, idx) => (
+              <View key={idx} className="flex-row justify-between mb-2 last:mb-0">
+                <Text className="text-zinc-300 text-base">{item.quantity}x {item.name}</Text>
+                <Text className="text-zinc-500">{item.calories} kcal</Text>
+              </View>
+            ))}
+            <View className="border-t border-zinc-800 mt-2 pt-2 flex-row justify-between">
+              <Text className="text-white font-bold">Total</Text>
+              <Text className="text-green-400 font-bold">{cachedCalories} kcal</Text>
+            </View>
+          </View>
+
+          <Pressable
+            onPress={() => onConfirm(cacheMatch.items)}
+            style={({ pressed }) => [{ transform: [{ scale: pressed ? 0.95 : 1 }] }]}
+            className="w-full bg-green-500 py-4 rounded-full items-center justify-center mb-3"
+          >
+            <Text className="text-black font-bold text-lg">Yes, save this!</Text>
+          </Pressable>
+
+          <Pressable
+            onPress={() => setShowCache(false)}
+            className="py-3"
+          >
+            <Text className="text-zinc-400 font-medium">Not quite →</Text>
+          </Pressable>
+        </Animated.View>
+      </View>
+    );
+  }
 
   return (
     <View className="flex-1 bg-black w-full">

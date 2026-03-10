@@ -1,4 +1,5 @@
 # NutriTrack AI — Implementation Plan v2
+
 **Version:** 2.0 | **Date:** March 2026 | **Changes:** Auto-add nutrition system
 
 This document is the step-by-step build guide. Each module has: what to build, exact prompts to use with your AI coding assistant (Cursor/Windsurf), acceptance criteria, and dependencies.
@@ -39,6 +40,7 @@ npm install rn-mlkit-ocr
 **Dependency:** Nothing. Do this first — it gives you all screens in RN.
 
 **Prompt for Cursor:**
+
 ```
 I have a React web app built with Tailwind CSS that serves as my UI design reference.
 I need to convert each component to React Native using NativeWind (Tailwind for RN).
@@ -55,6 +57,7 @@ Reference file: [paste component code]
 ```
 
 **Convert in this order:**
+
 1. `BottomNav` (no deps)
 2. `DashboardView` (needs BottomNav)
 3. `FinalResultsView` (no deps — needed by all flows)
@@ -79,6 +82,7 @@ Reference file: [paste component code]
 **What:** Database schema, RLS, auth, Edge Function skeleton. **Includes new ai_generated_foods table.**
 
 **Prompt:**
+
 ```
 Set up a Supabase project for NutriTrack AI, a food logging app with auto-add nutrition system.
 
@@ -105,6 +109,7 @@ nutrition data for foods not found in IFCT/USDA. This grows organically from use
 ```
 
 **After schema:**
+
 ```
 Create a Supabase client in lib/supabase.ts:
 - Use expo-secure-store as the auth storage adapter
@@ -134,6 +139,7 @@ Create a Supabase client in lib/supabase.ts:
 **What:** Seed ONLY IFCT data (528 foods). USDA seeding is now OPTIONAL with auto-add system.
 
 **Prompt:**
+
 ```
 Seed the NutriTrack AI food database with Indian foods only.
 
@@ -142,7 +148,7 @@ The IFCT dataset has 528 Indian foods. Create a seed file with at minimum these 
 with accurate per-100g values from the IFCT 2017 publication:
 
 Essential entries:
-- Staples: dal (yellow/black/masoor/toor/moong/rajma/chole), chawal/rice (white/brown), 
+- Staples: dal (yellow/black/masoor/toor/moong/rajma/chole), chawal/rice (white/brown),
   roti, chapati, paratha, puri, bhatura, naan
 - Curries: palak paneer, matar paneer, kadai paneer, aloo gobhi, bhindi masala, mix veg
 - South Indian: dosa (plain/masala/rava), idli, vada, sambar, rasam, coconut chutney
@@ -183,6 +189,7 @@ Filter to common items and insert into usda_foods table.
 **What:** Deploy the Supabase Edge Function with **round-robin load balancing** and **auto-add nutrition system**.
 
 **Prompt:**
+
 ```
 Create a Supabase Edge Function called food-detect with round-robin load balancing
 and auto-add nutrition system for NutriTrack AI.
@@ -194,7 +201,7 @@ Requirements:
 1. Auth: reject requests without valid Supabase JWT
 
 2. Photo mode ({ mode: 'photo', imageBase64: string }):
-   
+
    ROUND-ROBIN LOAD BALANCING (NEW):
    - Track api_daily_usage for today
    - Global counter roundRobinIndex
@@ -203,11 +210,11 @@ Requirements:
    - roundRobinIndex++
    - On 429 rate limit: auto-retry with next provider
    - [paste round-robin code from TRD_v6.md Section 3]
-   
+
    VISION AI:
    - Call selected provider's vision API with Indian food detection prompt
    - Return: food NAMES only (no nutrition)
-   
+
    AUTO-ADD NUTRITION (NEW):
    For each detected food name:
      a. Call search_all_foods(food_name) RPC
@@ -218,9 +225,9 @@ Requirements:
         - Insert into ai_generated_foods table
         - Return nutrition data
      d. Apply portion defaults from INDIAN_PORTION_DEFAULTS
-   
+
    Return: { tier: 'api', provider, foods: FoodItemWithNutrition[], meal_type }
-   
+
    If all providers exhausted: return { tier: 'manual', reason: 'daily_limit_reached' }
 
 3. Voice mode ({ mode: 'voice', audioBase64: string, mimeType: string }):
@@ -229,7 +236,7 @@ Requirements:
    - For each parsed food: call getNutritionForFood() (same auto-add logic)
    - Return: { transcript, items: VoiceItemWithNutrition[] }
 
-4. Secrets: 
+4. Secrets:
    GROQ_KEY_1, GROQ_KEY_2, GROQ_KEY_3, GROQ_KEY_4, OPENROUTER_KEY
 
 5. Helper function: getNutritionForFood(foodName: string)
@@ -239,21 +246,22 @@ Vision prompt: [paste from TRD_v6.md Section 6 or ai_prompts.md]
 Voice prompt: [paste from TRD_v6.md Section 7 or ai_prompts.md]
 Nutrition prompt (Llama 70B): [paste from AGENTS.md Agent 4]
 
-FoodItemWithNutrition: { 
-  name: string, 
-  portion: string, 
+FoodItemWithNutrition: {
+  name: string,
+  portion: string,
   calories_per_100g: number,
   protein_per_100g: number,
   carbs_per_100g: number,
   fat_per_100g: number,
   source: 'ifct'|'usda'|'ai_generated'|'openfoodfacts',
-  confidence: number 
+  confidence: number
 }
 
 NO estimated_calories from photo — nutrition is generic per-100g data.
 ```
 
 **Deploy:**
+
 ```bash
 supabase secrets set GROQ_KEY_1=gsk_xxxx
 supabase secrets set GROQ_KEY_2=gsk_xxxx
@@ -263,7 +271,8 @@ supabase secrets set OPENROUTER_KEY=sk-or-xxxx
 supabase functions deploy food-detect
 ```
 
-**Acceptance criteria:** 
+**Acceptance criteria:**
+
 - POST with test image returns foods WITH nutrition (no separate lookup needed)
 - Foods not in IFCT auto-added to ai_generated_foods table
 - Round-robin distributes load across 4 Groq accounts
@@ -276,6 +285,7 @@ supabase functions deploy food-detect
 **What:** Camera → ScanningView → MultiItemConfirmView → FinalResultsView wired end-to-end. **Nutrition now comes from Edge Function.**
 
 **Prompt:**
+
 ```
 Wire up the photo detection flow for NutriTrack AI with auto-add nutrition.
 
@@ -284,8 +294,8 @@ lib/foodDetect.ts:
     1. Validate: check file size (50KB-10MB), resolution (≥300×300)
     2. Compress: expo-image-manipulator resize to 1024px max, 80% JPEG quality
     3. Convert to base64: expo-file-system readAsStringAsync
-    4. Call: supabase.functions.invoke('food-detect', { 
-         body: { mode: 'photo', imageBase64 } 
+    4. Call: supabase.functions.invoke('food-detect', {
+         body: { mode: 'photo', imageBase64 }
        })
     5. Edge Function returns foods WITH nutrition already attached
     6. Apply portion defaults (if not already applied server-side)
@@ -319,7 +329,8 @@ MultiItemConfirmView → FinalResultsView:
   - Then Dashboard on "Done"
 ```
 
-**Acceptance criteria:** 
+**Acceptance criteria:**
+
 - Take photo of Indian food → items shown with nutrition immediately
 - Foods not in DB automatically added (check ai_generated_foods table grows)
 - Sliders adjust calories correctly
@@ -332,6 +343,7 @@ MultiItemConfirmView → FinalResultsView:
 **What:** VoiceRecordView → Edge Function → MultiItemConfirmView wired end-to-end. **Nutrition now from Edge Function.**
 
 **Prompt:**
+
 ```
 Wire up the voice logging flow for NutriTrack AI with auto-add nutrition.
 
@@ -343,8 +355,8 @@ lib/voiceRecorder.ts:
 lib/foodDetect.ts (add):
   async function detectFoodFromVoice(audioUri: string): Promise<{transcript: string, items: FoodItem[]}>:
     1. Read as base64 via expo-file-system
-    2. Call: supabase.functions.invoke('food-detect', { 
-         body: { mode: 'voice', audioBase64, mimeType: 'audio/m4a' } 
+    2. Call: supabase.functions.invoke('food-detect', {
+         body: { mode: 'voice', audioBase64, mimeType: 'audio/m4a' }
        })
     3. Edge Function returns { transcript, items } where items ALREADY HAVE NUTRITION
     4. Map items to FoodItem format for MultiItemConfirmView
@@ -364,7 +376,8 @@ Hinglish examples to test:
   "biryani khaya half plate"
 ```
 
-**Acceptance criteria:** 
+**Acceptance criteria:**
+
 - Record Hinglish → transcript shown → foods shown with nutrition
 - Foods not in DB automatically added
 - MultiItemConfirmView populated correctly
@@ -376,6 +389,7 @@ Hinglish examples to test:
 **What:** ScanLabelView handles BOTH barcode scanning AND OCR in single screen.
 
 **Prompt:**
+
 ```
 Wire up the combined barcode + label scan flow for NutriTrack AI.
 
@@ -406,12 +420,12 @@ ScanLabelView:
   - Show green scanning frame (same as current design)
   - Instruction text: "Point at barcode or nutrition label"
   - Barcode scanner active in background
-  
+
   On barcode detected:
     → Call lookupBarcode(barcode)
     → If found: Navigate to LabelResultView with barcode data (source='openfoodfacts', confidence=0.98)
     → If not found: Show toast "Product not in database. Scan nutrition label instead."
-  
+
   User taps "Scan Label" button or waits 3s without barcode:
     → Capture image
     → Call rn-mlkit-ocr.recognizeText(imageUri)
@@ -439,7 +453,8 @@ Indian brands covered by OpenFoodFacts barcodes:
   - Nestlé India products
 ```
 
-**Acceptance criteria:** 
+**Acceptance criteria:**
+
 - Point at Maggi packet barcode → instant nutrition data from OpenFoodFacts
 - Point at regional brand without barcode → tap to capture → OCR extracts nutrition
 - Serving count adjusts totals live
@@ -478,6 +493,7 @@ Indian brands covered by OpenFoodFacts barcodes:
 **What:** Core flow tests before release. **Includes auto-add testing.**
 
 **Test checklist:**
+
 ```
 Photo flow:
   □ Valid photo → Groq detects 2+ foods → nutrition shown immediately → sliders work → save → Dashboard updates
@@ -529,12 +545,13 @@ Security:
 **What:** Add admin panel or simple query to track auto-add system performance.
 
 **Prompt:**
+
 ```
 Create a simple analytics query for NutriTrack AI auto-add system.
 
 File: supabase/analytics/food_growth.sql
 
-SELECT 
+SELECT
   date_trunc('day', created_at) as date,
   source,
   count(*) as foods_added,
@@ -548,7 +565,7 @@ ORDER BY date DESC;
 Also create a view for most popular auto-added foods:
 
 CREATE VIEW popular_auto_foods AS
-SELECT 
+SELECT
   name,
   source,
   confidence,
@@ -569,13 +586,14 @@ LIMIT 100;
 ```
 Week 1:  Module 0 (RN conversion) + Module 1 (Supabase setup with ai_generated_foods) + Module 2 (Auth)
 Week 2:  Module 3 (Onboarding) + Module 4 (IFCT seed only - 2 hours!) + Module 5 (Manual entry)
-Week 3:  Module 6 (Edge Function with round-robin + auto-add) + Module 7 (Photo flow)
+Week 3:  [DONE] Module 6 (Edge Function with round-robin + auto-add) + Module 7 (Photo flow)
 Week 4:  Module 8 (Voice) + Module 9 (Label scan) + Module 10 (Cache)
 Week 5:  Module 11 (Dashboard/History) + Module 12 (Profile)
 Week 6:  Module 13 (Error handling) + Module 14 (Testing) + Module 15 (Analytics) + App Store prep
 ```
 
-**Time saved with auto-add:** 
+**Time saved with auto-add:**
+
 - 20-30 hours (USDA curation eliminated)
 - No manual nutrition entry UI needed
 - No custom food creation complexity
@@ -584,18 +602,18 @@ Week 6:  Module 13 (Error handling) + Module 14 (Testing) + Module 15 (Analytics
 
 ## Key Differences from v1
 
-| Aspect | v1 (Old) | v2 (Auto-Add) |
-|---|---|---|
-| **Database seeding** | IFCT + USDA (20-40 hours) | IFCT only (2 hours) |
-| **Nutrition lookup** | Client-side, separate step | Server-side, automatic |
-| **Missing foods** | User creates custom | System auto-adds |
-| **Edge Function** | Returns food names only | Returns foods WITH nutrition |
-| **Database tables** | 3 food tables | 4 food tables (+ ai_generated_foods) |
-| **API calls** | Vision only | Vision + Nutrition (separate quotas) |
-| **Database growth** | Static | Organic (528 → 15K+ over 3 months) |
-| **Load balancing** | Sequential failover | Round-robin |
-| **UX** | Manual entry friction | Seamless (zero friction) |
+| Aspect               | v1 (Old)                   | v2 (Auto-Add)                        |
+| -------------------- | -------------------------- | ------------------------------------ |
+| **Database seeding** | IFCT + USDA (20-40 hours)  | IFCT only (2 hours)                  |
+| **Nutrition lookup** | Client-side, separate step | Server-side, automatic               |
+| **Missing foods**    | User creates custom        | System auto-adds                     |
+| **Edge Function**    | Returns food names only    | Returns foods WITH nutrition         |
+| **Database tables**  | 3 food tables              | 4 food tables (+ ai_generated_foods) |
+| **API calls**        | Vision only                | Vision + Nutrition (separate quotas) |
+| **Database growth**  | Static                     | Organic (528 → 15K+ over 3 months)   |
+| **Load balancing**   | Sequential failover        | Round-robin                          |
+| **UX**               | Manual entry friction      | Seamless (zero friction)             |
 
 ---
 
-*Implementation Plan v2.0 — NutriTrack AI. 15 modules, 6 weeks, solo developer pace. Auto-add nutrition system eliminates manual curation and provides seamless UX.*
+_Implementation Plan v2.0 — NutriTrack AI. 15 modules, 6 weeks, solo developer pace. Auto-add nutrition system eliminates manual curation and provides seamless UX._

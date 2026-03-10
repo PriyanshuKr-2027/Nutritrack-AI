@@ -13,6 +13,7 @@ import * as Haptics from "expo-haptics";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Animated, { FadeInUp, FadeInDown } from "react-native-reanimated";
 import { supabase } from "../lib/supabase";
+import { SearchResultsSkeleton } from "./SkeletonLoaders";
 
 // Define these here for now to avoid circular dependencies if EditEntryView isn't created yet
 export interface FoodItemData {
@@ -236,9 +237,7 @@ export function SearchFoodView({
             </Text>
           </View>
         ) : isLoading && query.length >= 2 ? (
-          <View className="flex-1 items-center justify-center mt-20">
-            <Text className="text-zinc-500 text-base">Searching...</Text>
-          </View>
+          <SearchResultsSkeleton count={5} />
         ) : (
           <View className="flex-col">
             {displayList.map((item, idx) => {

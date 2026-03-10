@@ -8,6 +8,9 @@ import {
   Modal,
   StyleSheet,
   Platform,
+  ActivityIndicator,
+  RefreshControl,
+  FlatList,
 } from "react-native";
 import { Feather } from "@expo/vector-icons";
 import Animated, {
@@ -18,6 +21,9 @@ import Animated, {
 } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { ImageWithFallback } from "./ImageWithFallback";
+import { useInfiniteQuery } from "@tanstack/react-query";
+import { supabase, useSession } from "../lib/supabase";
+import { HistoryDaySkeleton } from "./SkeletonLoaders";
 
 // Types
 export interface HistoryItem {
@@ -32,133 +38,21 @@ export interface HistoryItem {
 
 interface DailyHistory {
   date: string;
+  fullDate?: string;
   totalCalories: number;
   items: HistoryItem[];
 }
 
-// Mock Images
-const samosaImg =
-  "https://images.unsplash.com/photo-1601050690597-df0568f70950?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxzYW1vc2F8ZW58MHx8fHwxNzcwMTU4MzEyfDA&ixlib=rb-4.1.0&q=80&w=1080";
-const chowmeinImg =
-  "https://images.unsplash.com/photo-1585032226651-759b368d7246?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxjaG93bWVpbnxlbnwwfHx8fDE3NzAxNTgzMTJ8MA&ixlib=rb-4.1.0&q=80&w=1080";
-const oatmealImg =
-  "https://images.unsplash.com/photo-1517673132405-a56a62b18caf?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxvYXRtZWFsfGVudwwfHx8fDE3NzAxNTgzMTJ8MA&ixlib=rb-4.1.0&q=80&w=1080";
-const saladImg =
-  "https://images.unsplash.com/photo-1512621776951-a57141f2eefd?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxzYWxhZHxlbnwwfHx8fDE3NzAxNTgzMTJ8MA&ixlib=rb-4.1.0&q=80&w=1080";
-
-// Mock Data
-const MOCK_HISTORY: DailyHistory[] = [
-  {
-    date: "Today",
-    totalCalories: 1250,
-    items: [
-      {
-        id: "1",
-        name: "Samosa",
-        image: samosaImg,
-        calories: 550,
-        mealType: "Snack",
-        time: "4:30 PM",
-        timestampRaw: Date.now(),
-      },
-      {
-        id: "2",
-        name: "Grilled Chicken Salad",
-        image: saladImg,
-        calories: 350,
-        mealType: "Lunch",
-        time: "12:30 PM",
-        timestampRaw: Date.now() - 3600000 * 4,
-      },
-      {
-        id: "3",
-        name: "Oatmeal & Berries",
-        image: oatmealImg,
-        calories: 350,
-        mealType: "Breakfast",
-        time: "8:00 AM",
-        timestampRaw: Date.now() - 3600000 * 8,
-      },
-    ],
-  },
-  {
-    date: "Yesterday",
-    totalCalories: 2100,
-    items: [
-      {
-        id: "4",
-        name: "Chowmein",
-        image: chowmeinImg,
-        calories: 480,
-        mealType: "Dinner",
-        time: "8:15 PM",
-        timestampRaw: Date.now() - 86400000,
-      },
-      {
-        id: "5",
-        name: "Banana Smoothie",
-        image: samosaImg,
-        calories: 320,
-        mealType: "Snack",
-        time: "4:00 PM",
-        timestampRaw: Date.now() - 86400000 - 3600000 * 4,
-      },
-      {
-        id: "6",
-        name: "Rice & Curry",
-        image: saladImg,
-        calories: 650,
-        mealType: "Lunch",
-        time: "1:00 PM",
-        timestampRaw: Date.now() - 86400000 - 3600000 * 7,
-      },
-      {
-        id: "7",
-        name: "Eggs & Toast",
-        image: oatmealImg,
-        calories: 450,
-        mealType: "Breakfast",
-        time: "9:00 AM",
-        timestampRaw: Date.now() - 86400000 - 3600000 * 11,
-      },
-    ],
-  },
-  {
-    date: "Wed, Oct 24",
-    totalCalories: 1850,
-    items: [
-      {
-        id: "8",
-        name: "Paneer Wrap",
-        image: samosaImg,
-        calories: 520,
-        mealType: "Dinner",
-        time: "7:45 PM",
-        timestampRaw: Date.now() - 86400000 * 2,
-      },
-      {
-        id: "9",
-        name: "Fruit Bowl",
-        image: oatmealImg,
-        calories: 250,
-        mealType: "Snack",
-        time: "3:30 PM",
-        timestampRaw: Date.now() - 86400000 * 2 - 3600000 * 4,
-      },
-    ],
-  },
-];
-
 interface HistoryViewProps {
   onBack: () => void;
-  onLogMeal: () => void;
-  onSelectMeal: (item: HistoryItem, dateContext: string) => void;
+  onOpenMealDetail?: (id: string) => void;
+  onOpenDayDetail?: (date: string) => void;
 }
 
 export function HistoryView({
   onBack,
-  onLogMeal,
-  onSelectMeal,
+  onOpenMealDetail,
+  onOpenDayDetail,
 }: HistoryViewProps) {
   const insets = useSafeAreaInsets();
   const [selectedItem, setSelectedItem] = useState<HistoryItem | null>(null);
@@ -177,7 +71,7 @@ export function HistoryView({
 
   // Handlers
   const handleItemClick = (item: HistoryItem, date: string) => {
-    onSelectMeal(item, date);
+    onOpenMealDetail?.(item.id);
   };
 
   const handleOptionsClick = (item: HistoryItem) => {
@@ -190,9 +84,107 @@ export function HistoryView({
     setSelectedItem(null);
   };
 
+  const { user } = useSession();
+  const PAGE_SIZE = 20;
+
+  const {
+    data,
+    fetchNextPage,
+    hasNextPage,
+    isFetchingNextPage,
+    isLoading,
+    refetch,
+    isRefetching,
+  } = useInfiniteQuery({
+    queryKey: ["historyMeals", user?.id],
+    initialPageParam: 0,
+    queryFn: async ({ pageParam = 0 }: { pageParam: number }) => {
+      if (!user) return [];
+      const { data: meals, error } = await supabase
+        .from("meals")
+        .select(`
+          id, meal_type, logged_at, total_calories,
+          meal_items(id, food_name, calories)
+        `)
+        .eq("user_id", user.id)
+        .order("logged_at", { ascending: false })
+        .range(pageParam, pageParam + PAGE_SIZE - 1);
+
+      if (error) {
+        console.error("Error fetching history meals:", error);
+        return [];
+      }
+      return meals || [];
+    },
+    getNextPageParam: (lastPage: any[], allPages: any[][]) => {
+      if (!lastPage || lastPage.length < PAGE_SIZE) return undefined;
+      return allPages.length * PAGE_SIZE;
+    },
+    enabled: !!user,
+  });
+
+  const formatHeaderDate = (dateString: string) => {
+    const date = new Date(dateString);
+    const today = new Date();
+    const yesterday = new Date();
+    yesterday.setDate(yesterday.getDate() - 1);
+
+    if (date.toDateString() === today.toDateString()) return "Today";
+    if (date.toDateString() === yesterday.toDateString()) return "Yesterday";
+    
+    return date.toLocaleDateString("en-US", { weekday: 'short', month: 'short', day: 'numeric' });
+  };
+
+  const parsedHistory = useMemo(() => {
+    if (!data) return [];
+    
+    const allMeals = data.pages.flat();
+    const grouped: Record<string, DailyHistory> = {};
+
+    allMeals.forEach((meal: any) => {
+      const dateStr = meal.logged_at.split("T")[0]; // YYYY-MM-DD
+      const headerDate = formatHeaderDate(meal.logged_at);
+      
+      if (!grouped[dateStr]) {
+        grouped[dateStr] = {
+          date: headerDate,
+          fullDate: dateStr,
+          totalCalories: 0,
+          items: [],
+        };
+      }
+
+      grouped[dateStr].totalCalories += Math.round(meal.total_calories || 0);
+
+      let representativeName = meal.meal_type; 
+      let repImage = "https://images.unsplash.com/photo-1546069901-ba9599a7e63c?w=400&q=80";
+      
+      if (meal.meal_items && meal.meal_items.length > 0) {
+        representativeName = meal.meal_items.map((i: any) => i.food_name).join(", ");
+      }
+
+      const timeStr = new Date(meal.logged_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+
+      grouped[dateStr].items.push({
+        id: String(meal.id),
+        name: representativeName,
+        image: repImage,
+        calories: Math.round(meal.total_calories || 0),
+        mealType: meal.meal_type,
+        time: timeStr,
+        timestampRaw: new Date(meal.logged_at).getTime(),
+      });
+    });
+
+    return Object.values(grouped).sort((a, b) => {
+        if (!a.items.length || !b.items.length) return 0;
+        return b.items[0].timestampRaw! - a.items[0].timestampRaw!;
+    });
+  }, [data]);
+
   // Filter Logic
   const filteredHistory = useMemo(() => {
-    return MOCK_HISTORY.map((day) => {
+    return parsedHistory.map((day) => {
       // 1. Filter items by meal type and search query
       const items = day.items.filter((item) => {
         // Meal type filter
@@ -207,15 +199,12 @@ export function HistoryView({
         return matchesMealType && matchesSearch;
       });
 
-      // 2. Filter days by date range (Mock logic)
+      // 2. Filter days by date range
       let includeDay = true;
       if (dateRange === "Today" && day.date !== "Today") includeDay = false;
       if (dateRange === "Yesterday" && day.date !== "Yesterday")
         includeDay = false;
-      if (dateRange === "Custom" && (customStartDate || customEndDate)) {
-        includeDay = true; // In real app, would check timestamps
-      }
-
+      
       if (!includeDay || items.length === 0) return null;
 
       // Recalculate total calories for filtered items
@@ -231,11 +220,10 @@ export function HistoryView({
       };
     }).filter(Boolean) as DailyHistory[];
   }, [
+    parsedHistory,
     selectedMealType,
     dateRange,
     searchQuery,
-    customStartDate,
-    customEndDate,
   ]);
 
   const hasHistory = filteredHistory.length > 0;
@@ -334,8 +322,30 @@ export function HistoryView({
         className="flex-1 px-4"
         contentContainerStyle={{ paddingBottom: 120, paddingTop: 16 }}
         showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl 
+            refreshing={isRefetching && !isFetchingNextPage} 
+            onRefresh={refetch} 
+            tintColor="#22c55e"
+          />
+        }
+        onScroll={({ nativeEvent }) => {
+          if (!hasNextPage || isFetchingNextPage) return;
+          const { layoutMeasurement, contentOffset, contentSize } = nativeEvent;
+          const isCloseToBottom = layoutMeasurement.height + contentOffset.y >= contentSize.height - 200;
+          if (isCloseToBottom) {
+            fetchNextPage();
+          }
+        }}
+        scrollEventThrottle={400}
       >
-        {!hasHistory ? (
+        {isLoading ? (
+          <>
+            <HistoryDaySkeleton />
+            <HistoryDaySkeleton />
+            <HistoryDaySkeleton />
+          </>
+        ) : !hasHistory ? (
           <View className="flex-1 items-center justify-center mt-20">
             <View className="w-20 h-20 rounded-full bg-zinc-900 items-center justify-center mb-6">
               <Feather name="calendar" size={32} color="#52525b" />
@@ -362,7 +372,7 @@ export function HistoryView({
               </Pressable>
             )}
             <Pressable
-              onPress={onLogMeal}
+              onPress={onBack}
               style={({ pressed }) => [
                 { transform: [{ scale: pressed ? 0.95 : 1 }] },
               ]}
@@ -376,16 +386,20 @@ export function HistoryView({
             {filteredHistory.map((day, idx) => (
               <View key={`${day.date}-${idx}`}>
                 {/* Date Header */}
-                <View className="flex-row items-center justify-between mb-3 px-1">
+                <Pressable 
+                  onPress={() => onOpenDayDetail?.(day.fullDate || day.date)}
+                  className="flex-row items-center justify-between mb-3 px-1"
+                >
                   <Text className="text-sm font-bold text-zinc-400 uppercase tracking-wide">
                     {day.date}
                   </Text>
-                  <View className="bg-zinc-900/50 px-2 py-1 rounded-md border border-zinc-800/50">
+                  <View className="bg-zinc-900/50 px-2 py-1 rounded-md border border-zinc-800/50 flex-row items-center gap-2">
                     <Text className="text-xs font-medium text-zinc-500">
                       {day.totalCalories.toLocaleString()} kcal
                     </Text>
+                    <Feather name="chevron-right" size={12} color="#71717a" />
                   </View>
-                </View>
+                </Pressable>
 
                 {/* Divider */}
                 <View className="h-[1px] bg-zinc-800/50 w-full mb-4" />
@@ -458,6 +472,12 @@ export function HistoryView({
               </View>
             ))}
           </View>
+        )}
+        
+        {isFetchingNextPage && (
+            <View className="py-4 items-center">
+              <ActivityIndicator color="#22c55e" />
+            </View>
         )}
       </ScrollView>
 

@@ -4,6 +4,7 @@ import {
   Text,
   Pressable,
   ScrollView,
+  ActivityIndicator,
 } from "react-native";
 import { Feather } from "@expo/vector-icons";
 import Animated, {
@@ -14,6 +15,8 @@ import Animated, {
 } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
+import { useQuery } from "@tanstack/react-query";
+import { supabase, useSession } from "../lib/supabase";
 
 // Types
 export interface DayStats {
@@ -36,99 +39,118 @@ export interface DayStats {
   }[];
 }
 
-// Mock Data
-const MOCK_DAYS: DayStats[] = [
-  {
-    date: "Today",
-    totalCalories: 1850,
-    goalCalories: 2200,
-    macros: {
-      protein: { current: 95, goal: 130 },
-      carbs: { current: 210, goal: 250 },
-      fat: { current: 60, goal: 70 },
-    },
-    nutrients: { fiber: 18, sugar: 42, sodium: 1900 },
-    meals: [
-      { type: "Breakfast", calories: 320 },
-      { type: "Lunch", calories: 540 },
-      { type: "Snack", calories: 270 },
-      { type: "Dinner", calories: 720 },
-    ],
-  },
-  {
-    date: "Yesterday",
-    totalCalories: 2100,
-    goalCalories: 2200,
-    macros: {
-      protein: { current: 120, goal: 130 },
-      carbs: { current: 240, goal: 250 },
-      fat: { current: 65, goal: 70 },
-    },
-    nutrients: { fiber: 22, sugar: 38, sodium: 2100 },
-    meals: [
-      { type: "Breakfast", calories: 450 },
-      { type: "Lunch", calories: 650 },
-      { type: "Snack", calories: 320 },
-      { type: "Dinner", calories: 680 },
-    ],
-  },
-  {
-    date: "Mon, 12 Feb",
-    totalCalories: 1650,
-    goalCalories: 2200,
-    macros: {
-      protein: { current: 80, goal: 130 },
-      carbs: { current: 180, goal: 250 },
-      fat: { current: 50, goal: 70 },
-    },
-    nutrients: { fiber: 15, sugar: 30, sodium: 1800 },
-    meals: [
-      { type: "Breakfast", calories: 300 },
-      { type: "Lunch", calories: 500 },
-      { type: "Dinner", calories: 850 },
-    ],
-  },
-];
+// Removed MOCK_DAYS
 
 interface DayDetailViewProps {
-  initialDayIndex?: number;
+  initialDate: string;
   onBack: () => void;
-  onMealTypeSelect: (mealType: string) => void;
+  onOpenMealDetail?: (id: string) => void;
 }
 
 export function DayDetailView({
-  initialDayIndex = 0,
+  initialDate,
   onBack,
-  onMealTypeSelect,
+  onOpenMealDetail,
 }: DayDetailViewProps) {
   const insets = useSafeAreaInsets();
-  const [currentIndex, setCurrentIndex] = useState(initialDayIndex);
+  const { user } = useSession();
+  const [viewDate, setViewDate] = useState(initialDate); // YYYY-MM-DD format
   const [isNutrientsExpanded, setIsNutrientsExpanded] = useState(false);
 
-  const currentDay = MOCK_DAYS[currentIndex];
+  const { data: currentDay, isLoading } = useQuery({
+    queryKey: ["dayStats", user?.id, viewDate],
+    queryFn: async () => {
+      // Get profile goals
+      const { data: profile } = await supabase
+        .from("profiles")
+        .select("calorie_goal, protein_goal_g, carbs_goal_g, fat_goal_g")
+        .eq("id", user!.id)
+        .single();
+
+      // Get meals for the day
+      const { data: meals } = await supabase
+        .from("meals")
+        .select(`
+          id, meal_type, logged_at, total_calories, total_protein_g, total_carbs_g, total_fat_g,
+          meal_items(id, carbs_g, sodium_mg, sugar_g)
+        `)
+        .eq("user_id", user!.id)
+        .gte("logged_at", `${viewDate}T00:00:00.000Z`)
+        .lte("logged_at", `${viewDate}T23:59:59.999Z`);
+
+      let tCal = 0, tPro = 0, tCarb = 0, tFat = 0;
+      let tFiber = 0, tSugar = 0, tSodium = 0;
+      let dayMeals: any[] = [];
+
+      if (meals) {
+        meals.forEach((m: any) => {
+          tCal += Math.round(m.total_calories || 0);
+          tPro += Math.round(m.total_protein_g || 0);
+          tCarb += Math.round(m.total_carbs_g || 0);
+          tFat += Math.round(m.total_fat_g || 0);
+          
+          if (m.meal_items) {
+             m.meal_items.forEach((item: any) => {
+               // Fake fiber for now since IFCT database doesn't pass fiber through to meal_items
+               // But we do have sodium and sugar if OCR was used... 
+               tSodium += Math.round(item.sodium_mg || 0);
+               tSugar += Math.round(item.sugar_g || 0);
+             });
+          }
+
+          dayMeals.push({
+            id: String(m.id),
+            type: m.meal_type || 'Snack',
+            calories: Math.round(m.total_calories || 0),
+          });
+        });
+      }
+
+      const d = new Date(viewDate);
+      const isToday = d.toDateString() === new Date().toDateString();
+      const dateLabel = isToday ? "Today" : d.toLocaleDateString("en-US", { weekday: 'short', month: 'short', day: 'numeric' });
+
+      return {
+        date: dateLabel,
+        totalCalories: tCal,
+        goalCalories: profile?.calorie_goal || 2000,
+        macros: {
+          protein: { current: tPro, goal: profile?.protein_goal_g || 150 },
+          carbs: { current: tCarb, goal: profile?.carbs_goal_g || 200 },
+          fat: { current: tFat, goal: profile?.fat_goal_g || 65 },
+        },
+        nutrients: { fiber: tFiber, sugar: tSugar, sodium: tSodium },
+        meals: dayMeals,
+      };
+    },
+    enabled: !!user,
+  });
 
   // Swipe Handlers
   const handlePrevDay = () => {
-    if (currentIndex < MOCK_DAYS.length - 1) {
-      setCurrentIndex((prev) => prev + 1);
-    }
+    const d = new Date(viewDate);
+    d.setDate(d.getDate() - 1);
+    setViewDate(d.toISOString().split("T")[0]);
   };
 
   const handleNextDay = () => {
-    if (currentIndex > 0) {
-      setCurrentIndex((prev) => prev - 1);
+    const todayStr = new Date().toISOString().split("T")[0];
+    if (viewDate < todayStr) {
+      const d = new Date(viewDate);
+      d.setDate(d.getDate() + 1);
+      setViewDate(d.toISOString().split("T")[0]);
     }
   };
 
   const panGesture = Gesture.Pan()
     .onEnd((e: any) => {
-      // Swipe Right -> View Next Day
+      // Swipe Right -> View Prev Day (visually scrolling left reveals previous)
       if (e.translationX > 50) {
-        handleNextDay();
-      }
-      // Swipe Left -> View Prev Day
-      if (e.translationX < -50) {
         handlePrevDay();
+      }
+      // Swipe Left -> View Next Day
+      if (e.translationX < -50) {
+        handleNextDay();
       }
     });
 
@@ -167,29 +189,26 @@ export function DayDetailView({
         <View className="flex-row items-center gap-4">
           <Pressable
             onPress={handlePrevDay}
-            disabled={currentIndex >= MOCK_DAYS.length - 1}
             className="p-2"
           >
             <Feather
               name="chevron-left"
               size={24}
-              color={
-                currentIndex >= MOCK_DAYS.length - 1 ? "#3f3f46" : "#a1a1aa"
-              }
+              color="#a1a1aa"
             />
           </Pressable>
           <Text className="text-lg font-bold w-32 text-center text-white">
-            {currentDay.date}
+            {currentDay?.date}
           </Text>
           <Pressable
             onPress={handleNextDay}
-            disabled={currentIndex <= 0}
+            disabled={viewDate >= new Date().toISOString().split("T")[0]}
             className="p-2"
           >
             <Feather
               name="chevron-right"
               size={24}
-              color={currentIndex <= 0 ? "#3f3f46" : "#a1a1aa"}
+              color={viewDate >= new Date().toISOString().split("T")[0] ? "#3f3f46" : "#a1a1aa"}
             />
           </Pressable>
         </View>
@@ -209,6 +228,9 @@ export function DayDetailView({
             <Text className="text-sm font-semibold text-zinc-500 uppercase tracking-widest mb-4">
               Total Calories
             </Text>
+            {isLoading ? (
+               <ActivityIndicator color="#22c55e" size="large" />
+            ) : currentDay ? (
             <View className="bg-zinc-900 rounded-[32px] p-6 border border-zinc-800">
               <View className="items-center">
                 <Text className="text-5xl font-bold text-white tracking-tight mb-2">
@@ -234,7 +256,11 @@ export function DayDetailView({
                 </View>
               </View>
             </View>
+            ) : null}
           </View>
+          
+          {currentDay && (
+            <>
 
           {/* Macro Breakdown Section */}
           <View className="mb-8">
@@ -378,7 +404,7 @@ export function DayDetailView({
                 return (
                   <Pressable
                     key={idx}
-                    onPress={() => onMealTypeSelect(meal.type)}
+                    onPress={() => onOpenMealDetail?.(meal.id)}
                     style={({ pressed }) => [
                       { backgroundColor: pressed ? "#27272a" : "transparent" },
                     ]}
@@ -412,6 +438,8 @@ export function DayDetailView({
               )}
             </View>
           </View>
+          </>
+        )}
         </ScrollView>
       </GestureDetector>
     </View>
