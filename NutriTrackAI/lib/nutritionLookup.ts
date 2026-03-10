@@ -5,7 +5,68 @@
 // foods returned directly by the Edge Function (Module 6).
 
 import { supabase } from './supabase';
-import { DetectedFoodItem, getPortionDefault } from './foodDetect';
+
+// ─── DetectedFoodItem (moved here from foodDetect.ts to break require cycle) ──
+
+/** Nutrition-enriched food item returned by the Edge Function. */
+export interface DetectedFoodItem {
+  name: string;
+  portion: string;               // e.g. "1 katori (150ml)"
+  calories_per_100g: number;
+  protein_per_100g: number;
+  carbs_per_100g: number;
+  fat_per_100g: number;
+  fiber_per_100g?: number;
+  source: 'ifct' | 'usda' | 'ai_generated' | 'openfoodfacts';
+  confidence: number;
+}
+
+// ─── Indian portion defaults ──────────────────────────────────────────────────
+// Maps food name keywords → default serving weight in grams.
+
+export const INDIAN_PORTION_DEFAULTS: Record<string, number> = {
+  dal:           150,   // 1 katori (150ml bowl)
+  chawal:        200,   // 1 cup cooked rice
+  rice:          200,
+  roti:           45,   // 1 roti / chapati
+  chapati:        45,
+  paratha:        80,
+  naan:           90,
+  bhatura:       100,
+  puri:           40,
+  samosa:         90,   // 1 medium samosa
+  dosa:          100,
+  idli:           60,   // 1 idli
+  vada:           50,
+  biryani:       250,   // 1 plate (half-plate)
+  pulao:         200,
+  khichdi:       200,
+  raita:         100,
+  papad:          12,
+  dhokla:         60,
+  pakoda:         50,
+  gulab_jamun:    60,
+  jalebi:         60,
+  kheer:         150,
+  halwa:         100,
+  ladoo:          50,
+  sabzi:         150,   // generic curry served in katori
+  curry:         150,
+  chai:          150,   // 1 cup tea
+  milk:          200,
+  curd:          100,
+  paneer:        100,
+  default:       100,   // fallback
+};
+
+/** Return default serving weight (g) for a detected food name. */
+export function getPortionDefault(foodName: string): number {
+  const lower = foodName.toLowerCase();
+  for (const [key, grams] of Object.entries(INDIAN_PORTION_DEFAULTS)) {
+    if (lower.includes(key)) return grams;
+  }
+  return INDIAN_PORTION_DEFAULTS.default;
+}
 
 // ─── FoodItem ─────────────────────────────────────────────────────────────────
 // Matches the shape expected by MultiItemConfirmView.

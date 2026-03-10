@@ -1,8 +1,8 @@
 // lib/voiceRecorder.ts
-// Thin wrapper around expo-av Audio.Recording.
+// Thin wrapper around expo-audio AudioRecorder.
 // Handles permission, start/stop, and 15-second auto-stop.
 
-import { Audio } from 'expo-av';
+import { useAudioRecorder, AudioModule, RecordingPresets } from 'expo-audio';
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
 
@@ -12,33 +12,6 @@ export interface RecorderHandle {
   /** Cancel without producing a file (e.g. component unmounting). */
   cancel: () => Promise<void>;
 }
-
-// ─── Recording preset ──────────────────────────────────────────────────────────
-
-const RECORDING_OPTIONS: Audio.RecordingOptions = {
-  android: {
-    extension: '.m4a',
-    outputFormat: Audio.AndroidOutputFormat.MPEG_4,
-    audioEncoder: Audio.AndroidAudioEncoder.AAC,
-    sampleRate: 16000,
-    numberOfChannels: 1,
-    bitRate: 64000,
-  },
-  ios: {
-    extension: '.m4a',
-    audioQuality: Audio.IOSAudioQuality.MEDIUM,
-    sampleRate: 16000,
-    numberOfChannels: 1,
-    bitRate: 64000,
-    linearPCMBitDepth: 16,
-    linearPCMIsBigEndian: false,
-    linearPCMIsFloat: false,
-  },
-  web: {
-    mimeType: 'audio/webm',
-    bitsPerSecond: 64000,
-  },
-};
 
 const AUTO_STOP_MS = 15_000; // 15 seconds
 
@@ -56,34 +29,24 @@ export async function startRecording(
   onAutoStop: (uri: string) => void,
 ): Promise<RecorderHandle> {
   // 1. Permission
-  const { status } = await Audio.requestPermissionsAsync();
-  if (status !== 'granted') {
+  const { granted } = await AudioModule.requestRecordingPermissionsAsync();
+  if (!granted) {
     throw new Error('Microphone permission denied');
   }
 
-  // 2. Configure audio session
-  await Audio.setAudioModeAsync({
-    allowsRecordingIOS: true,
-    playsInSilentModeIOS: true,
-  });
-
-  // 3. Create and start recording
-  const recording = new Audio.Recording();
-  await recording.prepareToRecordAsync(RECORDING_OPTIONS);
-  await recording.startAsync();
+  // 2. Create recorder and start
+  const recorder = new AudioModule.AudioRecorder(RecordingPresets.HIGH_QUALITY);
+  await recorder.record();
 
   let stopped = false;
 
-  // 4. 15-second auto-stop
+  // 3. 15-second auto-stop
   const autoTimer = setTimeout(async () => {
     if (!stopped) {
       stopped = true;
       try {
-        await recording.stopAndUnloadAsync();
-        const uri = recording.getURI() ?? '';
-        // Restore audio session
-        await Audio.setAudioModeAsync({ allowsRecordingIOS: false });
-        onAutoStop(uri);
+        const uri = await recorder.stop();
+        onAutoStop(uri ?? '');
       } catch (e) {
         console.warn('[voiceRecorder] Auto-stop error:', e);
       }
@@ -96,11 +59,8 @@ export async function startRecording(
     if (stopped) return '';
     stopped = true;
     clearTimeout(autoTimer);
-
-    await recording.stopAndUnloadAsync();
-    const uri = recording.getURI() ?? '';
-    await Audio.setAudioModeAsync({ allowsRecordingIOS: false });
-    return uri;
+    const uri = await recorder.stop();
+    return uri ?? '';
   };
 
   const cancel = async (): Promise<void> => {
@@ -108,11 +68,10 @@ export async function startRecording(
     stopped = true;
     clearTimeout(autoTimer);
     try {
-      await recording.stopAndUnloadAsync();
+      await recorder.stop();
     } catch {
       // ignore errors during cleanup
     }
-    await Audio.setAudioModeAsync({ allowsRecordingIOS: false });
   };
 
   return { stop, cancel };

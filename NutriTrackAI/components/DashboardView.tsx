@@ -183,6 +183,7 @@ export function DashboardView({
               <MealCardSkeleton />
             </>
           ) : (
+          <>
           {/* Calorie Card */}
           <View className="bg-zinc-900 rounded-[32px] p-8 items-center justify-center relative border border-zinc-800/50 overflow-hidden mb-6">
             {/* Custom Gradient Glow - Approximated with View since blur is hard in RN */}
@@ -292,6 +293,7 @@ export function DashboardView({
               ))
             )}
           </View>
+          </>
           )}
         </View>
       </ScrollView>

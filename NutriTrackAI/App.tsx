@@ -28,6 +28,8 @@ import { VoiceRecordView } from './components/VoiceRecordView';
 import { ScanLabelView } from './components/ScanLabelView';
 import { LabelResultView } from './components/LabelResultView';
 import { HistoryView } from './components/HistoryView';
+import { TrendsView } from './components/TrendsView';
+import { BottomNav } from './components/BottomNav';
 import { MealDetailView } from './components/MealDetailView';
 import { DayDetailView } from './components/DayDetailView';
 import { ProfileView } from './components/ProfileView';
@@ -64,6 +66,7 @@ type AppView =
   | 'scanLabel'
   | 'labelResult'
   | 'history'
+  | 'trends'
   | 'mealDetail'
   | 'dayDetail'
   | 'profile';
@@ -88,6 +91,7 @@ export default function App() {
 
   // ─── Main App Navigation State ─────────────────────────────────────────────
   const [currentView, setCurrentView] = useState<AppView>('dashboard');
+  const [activeTab, setActiveTab] = useState<string>('home');
   const [selectedFood, setSelectedFood] = useState<FoodItemData | null>(null);
 
   // Photo flow state
@@ -184,7 +188,7 @@ export default function App() {
         .eq('user_id', user.id)
         .gte('logged_at', `${today}T00:00:00.000Z`)
         .lte('logged_at', `${today}T23:59:59.999Z`)
-        .eq('meal_type', entry.mealType)
+        .eq('meal_type', entry.mealType.toLowerCase())
         .maybeSingle();
 
       if (mealError && mealError.code !== 'PGRST116') throw mealError;
@@ -195,7 +199,7 @@ export default function App() {
           .insert({
             user_id:    user.id,
             logged_at:  new Date().toISOString(),
-            meal_type:  entry.mealType,
+            meal_type:  entry.mealType.toLowerCase(),
           })
           .select('id')
           .single();
@@ -471,6 +475,7 @@ export default function App() {
       <SafeAreaProvider>
         <GestureHandlerRootView style={{ flex: 1 }}>
           <StatusBar barStyle="light-content" backgroundColor="#000" />
+          <View style={{ flex: 1, backgroundColor: '#000' }}>
 
         {/* ── Dashboard ─────────────────────────────────────────────────── */}
         {currentView === 'dashboard' && (
@@ -479,8 +484,8 @@ export default function App() {
             onOpenCam={() => setCurrentView('camera')}
             onOpenVoice={() => setCurrentView('voice')}
             onOpenScanLabel={() => setCurrentView('scanLabel')}
-            onOpenHistory={() => setCurrentView('history')}
-            onOpenProfile={() => setCurrentView('profile')}
+            onOpenHistory={() => { setCurrentView('history'); setActiveTab('history'); }}
+            onOpenProfile={() => { setCurrentView('profile'); setActiveTab('profile'); }}
             onOpenDayDetail={(date) => {
               setSelectedDate(date);
               setCurrentView('dayDetail');
@@ -617,9 +622,11 @@ export default function App() {
           />
         )}
 
+        {currentView === 'trends' && <TrendsView />}
+
         {currentView === 'history' && (
           <HistoryView
-            onBack={() => setCurrentView('dashboard')}
+            onBack={() => { setCurrentView('dashboard'); setActiveTab('home'); }}
             onOpenMealDetail={(id: string) => {
               setSelectedMealId(id);
               setCurrentView('mealDetail');
@@ -654,12 +661,26 @@ export default function App() {
 
         {currentView === 'profile' && (
           <ProfileView
-            onBack={() => setCurrentView('dashboard')}
+            onBack={() => { setCurrentView('dashboard'); setActiveTab('home'); }}
             onLogout={async () => {
               await supabase.auth.signOut();
             }}
           />
         )}
+
+        {['dashboard', 'history', 'trends', 'profile'].includes(currentView) && (
+          <BottomNav
+            activeTab={activeTab}
+            setActiveTab={(tab) => {
+              setActiveTab(tab);
+              if (tab === 'home') setCurrentView('dashboard');
+              else if (tab === 'history') setCurrentView('history');
+              else if (tab === 'trends') setCurrentView('trends');
+              else if (tab === 'profile') setCurrentView('profile');
+            }}
+          />
+        )}
+          </View>
         <ErrorToast ref={toastRef} />
       </GestureHandlerRootView>
     </SafeAreaProvider>
